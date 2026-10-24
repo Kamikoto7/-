@@ -1,0 +1,439 @@
+*Статус загрузки файла, анализ и состояние*
+export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
+export type Language = 'ru' | 'en';
+export type Theme = 'light' | 'dark';
+
+export interface FileAnalysis {
+  name: string;
+  size: number;
+  sizeFormatted: string;
+  type: string;
+  extension: string;
+  lastModified: Date;
+  linesCount?: number;
+  preview?: string;
+  hash?: string;
+}
+
+export interface UploadedFile {
+  id: string;
+  file: File;
+  status: UploadStatus;
+  progress: number;
+  analysis?: FileAnalysis;
+  error?: string;
+}
+
+*Перевод*
+import { Language } from './types';
+
+export const translations = {
+  ru: {
+    title: 'Загрузка и анализ файлов',
+    dropzone: 'Перетащите файлы сюда или нажмите для выбора',
+    results: 'Результаты анализа',
+    size: 'Размер',
+    type: 'Тип',
+    extension: 'Расширение',
+    modified: 'Изменён',
+    lines: 'Строк',
+    preview: 'Превью',
+    error: 'Ошибка',
+    uploadProgress: 'Загрузка',
+    remove: 'Удалить',
+    language: 'Язык',
+    theme: 'Тема',
+    light: 'Светлая',
+    dark: 'Тёмная',
+    unknown: 'неизвестно',
+  },
+  en: {
+    title: 'File Upload and Analysis',
+    dropzone: 'Drop files here or click to select',
+    results: 'Analysis Results',
+    size: 'Size',
+    type: 'Type',
+    extension: 'Extension',
+    modified: 'Modified',
+    lines: 'Lines',
+    preview: 'Preview',
+    error: 'Error',
+    uploadProgress: 'Uploading',
+    remove: 'Remove',
+    language: 'Language',
+    theme: 'Theme',
+    light: 'Light',
+    dark: 'Dark',
+    unknown: 'unknown',
+  },
+} as const;
+
+export type TranslationKey = keyof typeof translations.ru;
+
+*Сама загрузка*
+import React, { useCallback, useRef, useState } from 'react';
+import { UploadedFile } from './types';
+import { analyzeFile } from './analyzer';
+
+interface Props {
+  onFilesAdded: (files: UploadedFile[]) => void;
+}
+
+export const FileUploader: React.FC<Props> = ({ onFilesAdded }) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const processFiles = useCallback(
+    async (fileList: FileList) => {
+      const items: UploadedFile[] = Array.from(fileList).map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        status: 'uploading',
+        progress: 0,
+      }));
+
+      onFilesAdded(items);
+
+      
+      for (const item of items) {
+        for (let p = 0; p <= 100; p += 20) {
+          await new Promise((r) => setTimeout(r, 100));
+          item.progress = p;
+        }
+        try {
+          item.analysis = await analyzeFile(item.file);
+          item.status = 'success';
+        } catch (e) {
+          item.status = 'error';
+          item.error = e instanceof Error ? e.message : 'Ошибка анализа';
+        }
+      }
+      onFilesAdded([...items]); 
+    },
+    [onFilesAdded],
+  );
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files.length) processFiles(e.dataTransfer.files);
+  };
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+      onClick={() => inputRef.current?.click()}
+      style={{
+        border: `2px dashed ${isDragging ? '#2563eb' : '#94a3b8'}`,
+        borderRadius: 12,
+        padding: 40,
+        textAlign: 'center',
+        cursor: 'pointer',
+        background: isDragging ? '#eff6ff' : '#f8fafc',
+        transition: 'all 0.2s',
+      }}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => e.target.files && processFiles(e.target.files)}
+      />
+      <p style={{ margin: 0, fontSize: 16, color: '#334155' }}>
+        Перетащите файлы сюда или <strong>нажмите для выбора</strong>
+      </p>
+    </div>
+  );
+};
+
+
+*Отображение результата*
+import React from 'react';
+import { UploadedFile } from './types';
+
+interface Props {
+  files: UploadedFile[];
+  onRemove: (id: string) => void;
+}
+
+export const FileResults: React.FC<Props> = ({ files, onRemove }) => {
+  if (files.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <h3>Результаты анализа ({files.length})</h3>
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {files.map((f) => (
+          <li
+            key={f.id}
+            style={{
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              padding: 16,
+              marginBottom: 12,
+              background: '#fff',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <strong>{f.file.name}</strong>
+              <button
+                onClick={() => onRemove(f.id)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#ef4444',
+                }}
+                aria-label="Удалить"
+              >
+                ×
+              </button>
+            </div>
+
+            {f.status === 'uploading' && (
+              <div style={{ marginTop: 8 }}>
+                <div
+                  style={{
+                    height: 6,
+                    background: '#e2e8f0',
+                    borderRadius: 3,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${f.progress}%`,
+                      height: '100%',
+                      background: '#2563eb',
+                      transition: 'width 0.2s',
+                    }}
+                  />
+                </div>
+                <small>Загрузка: {f.progress}%</small>
+              </div>
+            )}
+
+            {f.status === 'success' && f.analysis && (
+              <dl style={{ margin: '8px 0 0', fontSize: 14, color: '#475569' }}>
+                <div>
+                  <dt style={{ display: 'inline', fontWeight: 500 }}>Размер:</dt>{' '}
+                  <dd style={{ display: 'inline', margin: 0 }}>
+                    <b>{f.analysis.sizeFormatted}</b>
+                  </dd>
+                </div>
+                <div>
+                  <dt style={{ display: 'inline', fontWeight: 500 }}>Тип:</dt>{' '}
+                  <dd style={{ display: 'inline', margin: 0 }}>
+                    <b>{f.analysis.type}</b>
+                  </dd>
+                </div>
+                <div>
+                  <dt style={{ display: 'inline', fontWeight: 500 }}>Расширение:</dt>{' '}
+                  <dd style={{ display: 'inline', margin: 0 }}>
+                    <b>.{f.analysis.extension}</b>
+                  </dd>
+                </div>
+                <div>
+                  <dt style={{ display: 'inline', fontWeight: 500 }}>Изменён:</dt>{' '}
+                  <dd style={{ display: 'inline', margin: 0 }}>
+                    <b>{f.analysis.lastModified.toLocaleString()}</b>
+                  </dd>
+                </div>
+                {f.analysis.linesCount !== undefined && (
+                  <div>
+                    <dt style={{ display: 'inline', fontWeight: 500 }}>Строк:</dt>{' '}
+                    <dd style={{ display: 'inline', margin: 0 }}>
+                      <b>{f.analysis.linesCount}</b>
+                    </dd>
+                  </div>
+                )}
+                {f.analysis.preview && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontWeight: 500 }}>Превью:</div>
+                    <pre
+                      style={{
+                        background: '#f1f5f9',
+                        padding: 8,
+                        borderRadius: 4,
+                        fontSize: 12,
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {f.analysis.preview}
+                    </pre>
+                  </div>
+                )}
+              </dl>
+            )}
+
+            {f.status === 'error' && (
+              <div style={{ color: '#dc2626', marginTop: 8 }}>
+                Ошибка: {f.error}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+
+*Главное*
+import React, { useState } from 'react';
+import { UploadedFile } from './types';
+import { FileUploader } from './FileUploader';
+import { FileResults } from './FileResults';
+
+export const App: React.FC = () => {
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+
+  const handleAdd = (newItems: UploadedFile[]) => {
+    setFiles((prev) => {
+      const map = new Map(prev.map((f) => [f.id, f]));
+      newItems.forEach((f) => map.set(f.id, f));
+      return Array.from(map.values());
+    });
+  };
+
+  const handleRemove = (id: string) =>
+    setFiles((prev) => prev.filter((f) => f.id !== id));
+
+  return (
+    <div style={{ maxWidth: 720, margin: '40px auto', fontFamily: 'sans-serif' }}>
+      <h1>Загрузка и анализ файлов</h1>
+      <FileUploader onFilesAdded={handleAdd} />
+      <FileResults files={files} onRemove={handleRemove} />
+    </div>
+  );
+};
+
+
+import ast
+import os
+from typing import Dict, Any, List
+
+class PythonCodeAnalyzer:
+    def __init__(self, max_line_length: int = 79):
+        """Инициализация анализатора."""
+        self.max_line_length = max_line_length
+
+    def analyze_file(self, file_path: str) -> Dict[str, Any]:
+        stats = {
+            'file': file_path,
+            'total_lines': 0,
+            'empty_lines': 0,
+            'comment_lines': 0,
+            'functions': 0,
+            'classes': 0,
+            'long_lines': 0,
+            'errors': []
+        }
+
+        # 1. Чтение файла и обработка ошибок чтения
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                content = file.read()
+                lines = content.splitlines()
+        except FileNotFoundError:
+            stats['errors'].append("Файл не найден.")
+            return stats
+        except UnicodeDecodeError:
+            stats['errors'].append("Ошибка кодировки (файл не в UTF-8).")
+            return stats
+        except PermissionError:
+            stats['errors'].append("Нет прав для чтения файла.")
+            return stats
+        except Exception as e:
+            stats['errors'].append(f"Непредвиденная ошибка: {e}")
+            return stats
+
+        # 2. Подсчет строк, пустых строк и комментариев
+        stats['total_lines'] = len(lines)
+        for line in lines:
+            stripped_line = line.strip()
+            if not stripped_line:
+                stats['empty_lines'] += 1
+            elif stripped_line.startswith('#'):
+                stats['comment_lines'] += 1
+
+        # 4. Проверка длины строк
+        for line in lines:
+            if len(line) > self.max_line_length:
+                stats['long_lines'] += 1
+
+        # 3. Подсчет функций и классов через AST
+        try:
+            tree = ast.parse(content)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    stats['functions'] += 1
+                elif isinstance(node, ast.ClassDef):
+                    stats['classes'] += 1
+        except SyntaxError as e:
+            stats['errors'].append(f"Синтаксическая ошибка Python: {e}")
+
+        return stats
+
+    def analyze_directory(self, dir_path: str) -> List[Dict[str, Any]]:
+        results = []
+        if not os.path.isdir(dir_path):
+            print(f"Ошибка: Директория '{dir_path}' не найдена.")
+            return results
+
+        for root, _, files in os.walk(dir_path):
+            for file in files:
+                if file.endswith('.py'):
+                    full_path = os.path.join(root, file)
+                    results.append(self.analyze_file(full_path))
+        return results
+
+
+def print_report(stats_list: List[Dict[str, Any]]):
+    """Выводит результаты анализа в консоль."""
+    print("-" * 60)
+    print(f"{'ФАЙЛ':<30} | {'Строки':<8} | {'Ф/К':<6} | {'Ошибки'}")
+    print("-" * 60)
+    
+    total_lines = 0
+    total_funcs = 0
+    total_classes = 0
+    
+    for stats in stats_list:
+        if stats['errors']:
+            err_msg = "; ".join(stats['errors'])
+            print(f"{os.path.basename(stats['file']):<30} | {'ОШИБКА':<8} | {'ОШИБКА':<6} | {err_msg}")
+        else:
+            total_lines += stats['total_lines']
+            total_funcs += stats['functions']
+            total_classes += stats['classes']
+            
+            print(f"{os.path.basename(stats['file']):<30} | {stats['total_lines']:<8} | "
+                  f"{stats['functions']}/{stats['classes']:<4} | "
+                  f"Пустых: {stats['empty_lines']}, Комм: {stats['comment_lines']}, "
+                  f"Длинных(>{stats.get('max_line_length', 79)}): {stats['long_lines']}")
+                  
+    print("-" * 60)
+    print(f"ИТОГО: Строк - {total_lines} | Функций - {total_funcs} | Классов - {total_classes}")
+    print("-" * 60)
+
+
+if __name__ == "__main__":
+    # Пример использования:
+    # Укажите путь к файлу или папке с вашими Python-скриптами
+    TARGET_PATH = "."  # Текущая директория
+    
+    analyzer = PythonCodeAnalyzer(max_line_length=120) # Например, лимит 120 символов
+    
+    if os.path.isfile(TARGET_PATH) and TARGET_PATH.endswith('.py'):
+        report = [analyzer.analyze_file(TARGET_PATH)]
+    else:
+        report = analyzer.analyze_directory(TARGET_PATH)
+        
+    print_report(report)
